@@ -1,11 +1,21 @@
 # 🍽️ AI Food Analyzer
 
-An intelligent food analysis application powered by Google's Gemini Vision Language Model. Upload food images and get detailed information about recipes, nutrition, ingredients, and more!
+A simple and powerful food analysis application powe## 📱 How to Use
+
+**Super Simple Interface with 4 Main Features:**
+
+1. **📷 Upload Image**: Click the upload area and select a food image (JPG, PNG, WEBP)
+2. **🔥 Get Calories**: Click to get detailed calorie breakdown of all food items
+3. **� Get Ingredients**: Click to get complete ingredients list with quantities
+4. **👨‍🍳 Get Recipe**: Click to get detailed step-by-step cooking instructions from start to finish
+5. **💬 Ask Custom Questions**: Type any specific question about the food in the text box
+
+**Each analysis is focused and detailed - no overwhelming information, just what you need!**advanced AI models. Upload any food image and ask questions to get detailed information about recipes, nutrition, ingredients, and more!
 
 ![Food Analyzer Demo](https://img.shields.io/badge/AI-Food%20Analyzer-brightgreen)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.28%2B-red)
-![Gemini](https://img.shields.io/badge/Google-Gemini%20AI-yellow)
+![AI Models](https://img.shields.io/badge/AI-Gemini%20%7C%20Qwen-yellow)
 
 ## 🌟 Features
 
@@ -19,16 +29,17 @@ An intelligent food analysis application powered by Google's Gemini Vision Langu
 - Complete ingredient lists with measurements
 - Cooking tips and variations
 
-### 🥗 **Nutritional Analysis**
-- Calorie estimation per serving
-- Macronutrient breakdown (proteins, carbs, fats)
-- Vitamin and mineral content
+### 🥗 **Advanced Nutritional Analysis**
+- Precise calorie estimation per serving
+- Complete macronutrient breakdown (proteins, carbs, fats)
+- Micronutrient analysis (vitamins, minerals, antioxidants)
 - Health benefits and dietary considerations
+- Portion size analysis and cooking method impact
 
-### 💬 **Interactive Q&A**
-- Ask custom questions about any food
-- Get expert culinary advice
-- Cultural and historical food information
+### 💬 **Simple Interactive Interface**
+- Just upload an image and ask any question
+- Clean, minimal interface without complexity
+- Instant AI-powered responses
 
 ## 🚀 Quick Start
 
@@ -43,114 +54,119 @@ cd Week-End-Project
 pip install -r requirements.txt
 ```
 
-### 3. Configure API Key
+### 3. Configure API Keys
+
+#### For Gemini AI:
 1. Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-3. Add your API key to `.env`:
+2. Create a `.env` file and add:
    ```
    GEMINI_API_KEY=your_actual_api_key_here
    ```
 
+#### For Qwen AI (Optional):
+1. Get your Hugging Face token from [Hugging Face](https://huggingface.co/settings/tokens)
+2. Add to your `.env` file:
+   ```
+   HUGGINGFACE_TOKEN=your_huggingface_token_here
+   ```
+
 ### 4. Run the Application
+
+#### Option 1: Gemini AI (Recommended)
 ```bash
-streamlit run app.py
+streamlit run gemini.py
+```
+
+#### Option 2: Qwen AI (Advanced)
+```bash
+streamlit run Qwen-VLM.py
+```
+
+#### Option 3: SmolVLM AI (Lightweight)
+```bash
+streamlit run Smol.py
 ```
 
 The app will open in your browser at `http://localhost:8501`
 
 ## 📱 How to Use
 
-1. **Upload Image**: Click the upload area and select a food image (JPG, PNG, WEBP)
-2. **Choose Analysis Type**:
-   - 🍳 **Get Recipe**: Detailed cooking instructions
-   - 🥗 **Nutrition Info**: Calorie and nutrient analysis
-   - 🔍 **Identify Food**: Basic food identification
-3. **Ask Custom Questions**: Type any question about the food
-4. **Get AI Analysis**: Receive detailed, expert-level responses
+**Simple 3-Step Process:**
 
-## 🍕 Example Questions
+1. **📷 Upload Image**: Click the upload area and select a food image (JPG, PNG, WEBP)
+2. **� Ask Question**: Type any question about the food in the text box
+3. **🤖 Get Analysis**: Click "Analyze" to receive detailed, expert-level responses
+
+### Example Questions You Can Ask:
 
 ### Recipe & Cooking
-- "How do I make this dish?"
-- "What ingredients do I need?"
-- "Can you suggest variations?"
-- "What's the cooking time?"
+- "How do I make this dish step by step?"
+- "What cooking techniques are used here?"
+- "Can you suggest variations or substitutions?"
+- "What equipment do I need?"
 
 ### Nutrition & Health
-- "How many calories does this have?"
-- "Is this healthy?"
+- "How many calories are in each item?"
+- "What's the total calorie count?"
+- "Is this healthy for my diet?"
 - "What nutrients does this provide?"
-- "Any dietary considerations?"
 
 ### Cultural & Origin
 - "What cuisine is this from?"
 - "What's the cultural significance?"
-- "Are there similar dishes?"
+- "Are there similar dishes from other regions?"
 
 ## 🏗️ Project Structure
 
 ```
 Week-End-Project/
-├── app.py                 # Main Streamlit application
-├── prompt.py             # System prompt for Gemini model
-├── requirements.txt      # Python dependencies
-├── .env                 # Your API keys (create this)
+├── gemini.py            # Simple Gemini AI interface (Recommended)
+├── Qwen-VLM.py         # Simple Qwen AI interface (Advanced)
+├── Smol.py             # SmolVLM AI interface (Lightweight)
+├── prompt.py            # Enhanced system prompt for AI models
+├── requirements.txt     # Python dependencies
+├── .env                # Your API keys (create this)
 ├── README.md           # This file
 ```
 
 ## 🔧 Technical Details
 
 ### Technologies Used
-- **Frontend**: Streamlit for web interface
-- **AI Model**: Google Gemini 1.5 Flash (Vision + Language)
+- **Frontend**: Streamlit (Simple and clean interface)
+- **AI Models**: 
+  - Google Gemini 1.5 Flash (Vision + Language) - Recommended
+  - Qwen2.5-VL-7B-Instruct (Advanced Vision-Language Model)
 - **Image Processing**: PIL (Python Imaging Library)
 - **Environment**: Python-dotenv for configuration
 
-### Key Components
+### Why Three AI Models?
 
-#### `FoodAnalyzer` Class
-- Handles all interactions with Gemini API
-- Processes images and generates responses
-- Provides specialized methods for different analysis types
+#### 🟢 **Gemini AI (gemini.py)** - Recommended for most users
+- Cloud-based, no local model download required
+- Fast response times
+- Excellent food analysis capabilities
+- Lower hardware requirements
 
-#### System Prompt (`prompt.py`)
-- Comprehensive instructions for the AI model
-- Defines expertise areas and response formats
-- Ensures consistent, high-quality responses
+#### 🔵 **Qwen AI (Qwen-VLM.py)** - For advanced users
+- Runs locally on your machine
+- More privacy (no data sent to cloud)
+- Requires powerful hardware (8GB+ RAM, GPU recommended)
+- First run downloads ~15GB model
 
-#### Streamlit UI
-- Clean, intuitive interface
-- Responsive design with custom CSS
-- Real-time image upload and analysis
+#### 🟡 **SmolVLM AI (Smol.py)** - Lightweight option
+- Uses HuggingFace SmolVLM-Instruct model
+- Balanced performance and resource usage
+- Good for detailed recipe analysis
+- Tabular calorie format
+- No API keys required (uses transformers)
 
-## 🎨 Features in Detail
+## 🎨 Simple Interface Design
 
-### Advanced Food Recognition
-The AI can identify:
-- Main dishes and side items
-- Cooking techniques (grilled, fried, baked, etc.)
-- Visible ingredients and seasonings
-- Cuisine type and cultural origin
-- Presentation style and plating
-
-### Comprehensive Nutritional Analysis
-Get detailed information about:
-- Realistic calorie estimates
-- Macronutrient breakdown
-- Vitamin and mineral content
-- Health benefits and considerations
-- Portion size analysis
-
-### Expert Recipe Generation
-Receive professional-quality recipes with:
-- Complete ingredient lists
-- Step-by-step instructions
-- Prep and cooking times
-- Equipment requirements
-- Tips and variations
+All three interfaces feature the same minimal design:
+- **Upload Box**: Simply drag and drop or click to upload food images
+- **Three Main Buttons**: Get Calories (tabular format), Get Ingredients, Get Recipe (detailed process)
+- **Custom Question Box**: Type any specific question about the food
+- **Clean Results**: Easy-to-read analysis without clutter
 
 ## 📊 Supported Image Formats
 
@@ -180,9 +196,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Common Issues
 
-**API Key Error**
+**Gemini API Key Error**
 - Ensure your Gemini API key is correctly set in `.env`
 - Verify the key is valid and has appropriate permissions
+
+**Qwen/Hugging Face Token Error**
+- Ensure your Hugging Face token is correctly set in `.env`
+- Verify you have access to the Qwen model
 
 **Image Upload Issues**
 - Check file format (JPG, PNG, WEBP only)
@@ -192,6 +212,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Dependencies Error**
 - Run `pip install -r requirements.txt`
 - Ensure you're using Python 3.8 or higher
+
+**Qwen Model Loading Issues**
+- Ensure you have enough RAM (8GB+ recommended)
+- First-time model download may take time
+- Check your internet connection for model download
 
 ### Getting Help
 
@@ -204,6 +229,8 @@ If you encounter issues:
 ## 🌟 Acknowledgments
 
 - Google AI for the Gemini API
+- Qwen team for the open-source VLM model
+- Hugging Face for model hosting and transformers
 - Streamlit team for the amazing framework
 - The open-source community for inspiration
 

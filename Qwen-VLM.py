@@ -1,471 +1,377 @@
 import streamlit as st
-from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
-import torch
+from huggingface_hub import login
 from PIL import Image
-import os
-from dotenv import load_dotenv
-from prompt import SYSTEM_PROMPT
-import time
+import torch
 
-# Load environment variables
-load_dotenv()
+# Import the system prompt
+from prompt import SYSTEM_PROMPT
 
 class QwenFoodAnalyzer:
     def __init__(self):
-        """Initialize the Qwen VL food analyzer"""
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model_name = "Qwen/Qwen2.5-VL-7B-Instruct"
-        
-        # Initialize with loading state
         self.model = None
         self.processor = None
-        self.tokenizer = None
-        
-        # Check for Hugging Face token
-        self.hf_token = os.getenv("HUGGINGFACE_TOKEN")
-        
-    def load_model(self):
-        """Load the Qwen model with progress indicator"""
-        if self.model is None:
-            try:
-                # Load model components
-                self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-                    self.model_name,
-                    torch_dtype=torch.bfloat16 if self.device == "cuda" else torch.float32,
-                    attn_implementation="flash_attention_2" if self.device == "cuda" else "eager",
-                    device_map="auto" if self.device == "cuda" else None,
-                    token=self.hf_token
-                )
-                
-                self.processor = AutoProcessor.from_pretrained(
-                    self.model_name,
-                    token=self.hf_token
-                )
-                
-                self.tokenizer = AutoTokenizer.from_pretrained(
-                    self.model_name,
-                    token=self.hf_token
-                )
-                
-                # Move to device if not using device_map
-                if self.device == "cpu":
-                    self.model = self.model.to(self.device)
-                
-                return True, "Model loaded successfully!"
-                
-            except Exception as e:
-                return False, f"Error loading model: {str(e)}"
-        
-        return True, "Model already loaded"
+        self.model_loaded = False
+        self.error_message = "Model not loaded. Please enter your HuggingFace token and wait for model initialization."
     
-    def validate_image(self, image):
-        """Validate uploaded image"""
-        if image is None:
-            return False, "No image provided"
-        
-        # Check image size
-        if image.size[0] * image.size[1] > 16777216:  # 4096x4096 max
-            return False, "Image too large. Please upload a smaller image."
-        
-        return True, "Valid image"
+    def load_model(self, token):
+        """Load the Qwen2VL model"""
+        try:
+            login(token)
+            self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+                "Qwen/Qwen2-VL-7B-Instruct",
+                torch_dtype="auto",
+                device_map="auto",
+                token=token
+            )
+            self.processor = AutoProcessor.from_pretrained(
+                "Qwen/Qwen2-VL-7B-Instruct",
+                token=token
+            )
+            self.model_loaded = True
+            return True, "Model loaded successfully!"
+        except Exception as e:
+            self.model_loaded = False
+            return False, f"Failed to load model: {str(e)}"
     
-    def analyze_with_qwen(self, prompt, image, max_retries=3):
-        """Analyze image with Qwen VL model"""
-        for attempt in range(max_retries):
-            try:
-                # Prepare messages for Qwen
-                messages = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "image": image,
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ]
-                
-                # Prepare inputs
-                text = self.processor.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
-                
-                image_inputs, video_inputs = process_vision_info(messages)
-                
-                inputs = self.processor(
-                    text=[text],
-                    images=image_inputs,
-                    videos=video_inputs,
-                    padding=True,
-                    return_tensors="pt",
-                )
-                
-                inputs = inputs.to(self.device)
-                
-                # Generate response
-                generated_ids = self.model.generate(
-                    **inputs,
-                    max_new_tokens=1024,
-                    temperature=0.7,
-                    do_sample=True,
-                    pad_token_id=self.tokenizer.eos_token_id
-                )
-                
-                generated_ids_trimmed = [
-                    out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-                ]
-                
-                output_text = self.processor.batch_decode(
-                    generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-                )
-                
-                return output_text[0] if output_text else "No response generated"
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(1)  # Wait before retry
-                    continue
-                else:
-                    return f"Error analyzing image after {max_retries} attempts: {str(e)}"
+    def analyze_image(self, image, custom_prompt):
+        """Analyze image with custom prompt"""
+        if not self.model_loaded:
+            return self.error_message
+        
+        try:
+            full_prompt = f"{SYSTEM_PROMPT}\n\n{custom_prompt}"
+            
+            messages = [
+                {"role": "user", "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": full_prompt},
+                ]}
+            ]
+            
+            # Prepare inputs
+            text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            image_inputs, video_inputs = process_vision_info(messages)
+            inputs = self.processor(
+                text=[text],
+                images=image_inputs,
+                videos=video_inputs,
+                padding=True,
+                return_tensors="pt"
+            ).to("cuda" if torch.cuda.is_available() else "cpu")
+            
+            generated_ids = self.model.generate(**inputs, max_new_tokens=500)
+            output_text = self.processor.batch_decode(
+                generated_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=False
+            )[0]
+            
+            return output_text
+            
+        except Exception as e:
+            return f"Error analyzing image: {str(e)}"
     
-    def analyze_food_image(self, image, user_question):
-        """Main analysis function"""
-        is_valid, message = self.validate_image(image)
-        if not is_valid:
-            return message
+    def get_calorie_count(self, image):
+        """Get calorie count of the food"""
+        prompt = """IMPORTANT: Please provide ONLY the calorie information for the food in this image. Answer this specific question only:
+
+"What is the calorie count of each food item visible in this image and what is the total calorie count?"
+
+Please format your response as a clear table with:
+- Food Item | Estimated Calories | Portion Size
+- Then provide the total calories at the end
+
+Make it clear and organized in a tabular format. Do not provide any other information."""
         
-        # Load model if not already loaded
-        success, load_message = self.load_model()
-        if not success:
-            return load_message
-        
-        prompt = f"{SYSTEM_PROMPT}\n\nUser Question: {user_question}"
-        return self.analyze_with_qwen(prompt, image)
+        return self.analyze_image(image, prompt)
     
-    def get_comprehensive_analysis(self, image):
-        """Get a comprehensive analysis of the food"""
-        is_valid, message = self.validate_image(image)
-        if not is_valid:
-            return message
-        
-        # Load model if not already loaded
-        success, load_message = self.load_model()
-        if not success:
-            return load_message
-        
-        comprehensive_prompt = f"""{SYSTEM_PROMPT}
+    def get_ingredients(self, image):
+        """Get ingredients needed to make the food"""
+        prompt = """IMPORTANT: Please provide ONLY the ingredients list for the food in this image. Answer this specific question only:
 
-Please provide a comprehensive analysis of this food image including:
+"What are the ingredients needed to make this dish and in what approximate quantities?"
 
-## 🔍 Food Identification
-- Main dish name and type
-- Visible ingredients
-- Cooking method used
-- Cuisine origin
+Please format your response as:
+- Clear list of ingredients with quantities
+- Organized by category (proteins, vegetables, spices, etc.)
 
-## 🍳 Recipe Overview
-- Brief recipe summary
-- Key preparation steps
-- Approximate cooking time
+Make it recipe-ready and well-organized. Do not provide any other information."""
+        
+        return self.analyze_image(image, prompt)
+    
+    def get_recipe(self, image):
+        """Get detailed recipe for the food"""
+        prompt = """IMPORTANT: Please provide ONLY a detailed recipe for the food in this image. Answer this specific question only:
 
-## 🥗 Nutritional Highlights
-- Estimated calories per serving
-- Main nutrients
-- Health benefits
+"How do I make this dish step by step from start to finish?"
 
-## 🌍 Cultural Context
-- Origin and cultural significance
-- Traditional serving occasions
+Please provide:
+- Complete ingredients list with exact quantities
+- Detailed step-by-step cooking instructions
+- Cooking times and temperatures
+- Equipment needed
+- Pro tips for success
 
-Please format your response clearly with the sections above."""
+Make it a complete, detailed recipe that a beginner can follow. Do not provide any other information."""
         
-        return self.analyze_with_qwen(comprehensive_prompt, image)
-
-def create_qwen_sidebar():
-    """Create and populate the sidebar for Qwen version"""
-    with st.sidebar:
-        st.image("https://img.icons8.com/color/96/000000/artificial-intelligence.png", width=80)
-        st.title("🤖 Qwen Food AI")
-        
-        st.markdown("### 🧠 Model Info")
-        st.info("""
-        **Model**: Qwen2.5-VL-7B-Instruct
-        
-        **Capabilities**:
-        - Advanced vision-language understanding
-        - Multilingual support
-        - High-quality reasoning
-        """)
-        
-        st.markdown("### 🎯 What I Can Do")
-        st.success("""
-        **🔍 Identify** any food or dish
-        
-        **📝 Generate** detailed recipes
-        
-        **🥗 Analyze** nutritional content
-        
-        **🌍 Explain** cultural background
-        
-        **💬 Answer** any food questions
-        """)
-        
-        st.markdown("### 📸 Upload Tips")
-        st.warning("""
-        ✅ Clear, well-lit images work best
-        
-        ✅ Show the full dish if possible
-        
-        ✅ Avoid blurry or dark photos
-        
-        ✅ Supported: JPG, PNG, WEBP
-        """)
-        
-        # Hardware info
-        device = "🖥️ GPU" if torch.cuda.is_available() else "💻 CPU"
-        st.markdown(f"### ⚡ Running on: {device}")
+        return self.analyze_image(image, prompt)
 
 def main():
-    """Main application function for Qwen version"""
+    # Enhanced page configuration
     st.set_page_config(
-        page_title="Qwen Food AI Analyzer",
+        page_title="Qwen Food Analyzer",
         page_icon="🤖",
-        layout="wide",
-        initial_sidebar_state="expanded"
+        layout="centered",
+        initial_sidebar_state="collapsed"
     )
     
-    # Custom CSS
+    # Custom CSS for enhanced styling
     st.markdown("""
     <style>
     .main-header {
         text-align: center;
-        padding: 1rem 0;
-        background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+        background: linear-gradient(90deg, #667eea, #764ba2);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-size: 2.5rem;
         font-weight: bold;
         margin-bottom: 1rem;
     }
-    .upload-area {
-        border: 3px dashed #667eea;
-        border-radius: 15px;
-        padding: 2rem;
-        text-align: center;
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        margin: 1rem 0;
-        transition: all 0.3s ease;
-    }
-    .upload-area:hover {
-        border-color: #764ba2;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-    .analysis-card {
-        background: white;
+    .feature-card {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
         padding: 1.5rem;
         border-radius: 15px;
+        border: 1px solid #dee2e6;
+        margin: 0.5rem 0;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin: 1rem 0;
+        transition: transform 0.3s ease;
         border-left: 5px solid #667eea;
     }
-    .qwen-button {
+    .feature-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+    .result-container {
+        border-radius: 15px;
+        border: 2px solid;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .calories-result {
+        background-color: #e3f2fd;
+        border-color: #2196f3;
+        color: #0d47a1;
+    }
+    .ingredients-result {
+        background-color: #e8f5e8;
+        border-color: #4caf50;
+        color: #1b5e20;
+    }
+    .recipe-result {
+        background-color: #fff3e0;
+        border-color: #ff9800;
+        color: #e65100;
+    }
+    .custom-result {
+        background-color: #f3e5f5;
+        border-color: #9c27b0;
+        color: #4a148c;
+    }
+    .stButton > button {
         background: linear-gradient(45deg, #667eea, #764ba2);
         color: white;
         border: none;
-        border-radius: 25px;
-        padding: 0.5rem 1.5rem;
+        border-radius: 10px;
+        padding: 0.5rem 1rem;
         font-weight: bold;
         transition: all 0.3s ease;
     }
-    .qwen-button:hover {
+    .stButton > button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    }
-    .model-info {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        margin-bottom: 1rem;
-        text-align: center;
     }
     </style>
     """, unsafe_allow_html=True)
     
-    # Create sidebar
-    create_qwen_sidebar()
+    # Header with enhanced styling
+    st.markdown('<h1 class="main-header">🤖 Qwen2.5-VL Food Analyzer</h1>', unsafe_allow_html=True)
+    st.markdown("**Upload a food image and get detailed AI-powered analysis using advanced Vision-Language AI!**")
     
-    # Main header
-    st.markdown('<h1 class="main-header">🤖 Qwen Food AI Analyzer</h1>', unsafe_allow_html=True)
+    # Initialize analyzer
+    if 'analyzer' not in st.session_state:
+        st.session_state.analyzer = QwenFoodAnalyzer()
     
-    # Model info banner
-    st.markdown("""
-    <div class="model-info">
-        <h3>🧠 Powered by Qwen2.5-VL-7B-Instruct</h3>
-        <p>Advanced Vision-Language Model for Food Analysis</p>
-    </div>
-    """, unsafe_allow_html=True)
+    analyzer = st.session_state.analyzer
     
-    # Warning about model loading
-    st.warning("🔄 **First-time setup**: The model will download and load automatically (may take a few minutes)")
+    # Authentication section
+    st.markdown("### 🔐 Authentication")
+    HF_TOKEN = st.text_input(
+        "Enter your HuggingFace Access Token:",
+        value="",
+        type="password",
+        help="Required to access the Qwen2.5-VL model from HuggingFace"
+    )
     
-    # Check for Hugging Face token
-    if not os.getenv("HUGGINGFACE_TOKEN"):
-        st.error("🔑 **Hugging Face Token Required**: Please add your HUGGINGFACE_TOKEN to the .env file")
-        st.info("💡 Get your token from: https://huggingface.co/settings/tokens")
-        st.stop()
+    if HF_TOKEN and not analyzer.model_loaded:
+        with st.spinner("🔄 Loading Qwen2.5-VL model... This may take a few minutes..."):
+            success, message = analyzer.load_model(HF_TOKEN)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
     
-    # Main layout
-    col1, col2 = st.columns([1.2, 1.8])
-    
-    with col1:
-        st.markdown('<div class="upload-area">', unsafe_allow_html=True)
-        st.subheader("📷 Upload Food Image")
+    if analyzer.model_loaded:
+        # Info banner
+        st.info("✅ Qwen2.5-VL-7B-Instruct model loaded successfully! Ready for analysis.")
         
+        # Image upload section
+        st.markdown("### 📷 Upload Food Image")
         uploaded_file = st.file_uploader(
-            "Choose your food image",
+            "Choose a food image...",
             type=['jpg', 'jpeg', 'png', 'webp'],
-            help="Upload a clear image of any food item",
-            label_visibility="collapsed"
+            help="Upload clear, well-lit images for best results"
         )
         
         if uploaded_file is not None:
-            try:
-                image = Image.open(uploaded_file)
-                st.image(image, caption="📸 Your Food Image", use_column_width=True)
-                st.session_state.qwen_image = image
-                st.success("✅ Image uploaded successfully!")
-            except Exception as e:
-                st.error(f"❌ Error loading image: {str(e)}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Quick analysis buttons
-        if 'qwen_image' in st.session_state:
-            st.subheader("⚡ Quick Analysis")
+            # Store image in session state
+            st.session_state.uploaded_image = Image.open(uploaded_file)
             
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("🔍 Identify Food", use_container_width=True, key="qwen_identify"):
-                    st.session_state.qwen_action = "identify"
-                if st.button("🥗 Nutrition Facts", use_container_width=True, key="qwen_nutrition"):
-                    st.session_state.qwen_action = "nutrition"
+            # Display image
+            st.image(st.session_state.uploaded_image, caption="Uploaded Food Image", use_column_width=True)
             
-            with col_btn2:
-                if st.button("🍳 Get Recipe", use_container_width=True, key="qwen_recipe"):
-                    st.session_state.qwen_action = "recipe"
-                if st.button("📊 Full Analysis", use_container_width=True, key="qwen_comprehensive"):
-                    st.session_state.qwen_action = "comprehensive"
-    
-    with col2:
-        if 'qwen_image' in st.session_state:
-            # Initialize analyzer
-            if 'qwen_analyzer' not in st.session_state:
-                st.session_state.qwen_analyzer = QwenFoodAnalyzer()
+            # Analysis buttons
+            st.markdown("### 🔍 Choose Analysis Type")
+            col1, col2, col3 = st.columns(3)
             
-            analyzer = st.session_state.qwen_analyzer
+            with col1:
+                if st.button("🔥 Get Calorie Count", use_container_width=True, help="Get detailed calorie breakdown"):
+                    with st.spinner("🔍 Analyzing calories..."):
+                        result = analyzer.get_calorie_count(st.session_state.uploaded_image)
+                        st.session_state.calorie_result = result
+                        st.success("Calorie analysis completed!")
+            
+            with col2:
+                if st.button("🥬 Get Ingredients", use_container_width=True, help="Get complete ingredients list"):
+                    with st.spinner("🔍 Identifying ingredients..."):
+                        result = analyzer.get_ingredients(st.session_state.uploaded_image)
+                        st.session_state.ingredients_result = result
+                        st.success("Ingredients identified!")
+            
+            with col3:
+                if st.button("👨‍🍳 Get Recipe", use_container_width=True, help="Get detailed cooking instructions"):
+                    with st.spinner("🔍 Generating detailed recipe..."):
+                        result = analyzer.get_recipe(st.session_state.uploaded_image)
+                        st.session_state.recipe_result = result
+                        st.success("Recipe generated!")
             
             # Custom question section
-            st.subheader("💬 Ask About Your Food")
-            user_question = st.text_area(
-                "What would you like to know?",
-                placeholder="e.g., What spices are used? How healthy is this? Can I make this vegan?",
-                height=100,
-                help="Ask any question about the food in the image",
-                key="qwen_question"
+            st.markdown("### 💬 Ask Custom Question")
+            custom_question = st.text_input(
+                "Ask anything about this food:",
+                placeholder="e.g., What cuisine is this? Is it healthy? How spicy is it?",
+                help="Ask any specific question about the food image"
             )
             
-            if st.button("🤖 Analyze Question", type="primary", use_container_width=True, key="qwen_analyze"):
-                if user_question.strip():
-                    with st.spinner("🧠 Qwen is analyzing your question..."):
-                        result = analyzer.analyze_food_image(st.session_state.qwen_image, user_question)
-                        st.markdown("### 🤖 Qwen AI Analysis")
-                        st.markdown(f'<div class="analysis-card">{result}</div>', unsafe_allow_html=True)
-                else:
-                    st.warning("⚠️ Please enter a question first!")
+            if st.button("🤔 Ask Question", use_container_width=True) and custom_question:
+                with st.spinner("🔍 Analyzing your question..."):
+                    result = analyzer.analyze_image(st.session_state.uploaded_image, custom_question)
+                    st.session_state.custom_result = result
+                    st.success("Analysis completed!")
             
-            # Handle quick actions
-            if hasattr(st.session_state, 'qwen_action'):
-                action = st.session_state.qwen_action
-                
-                if action == "identify":
-                    with st.spinner("🔍 Qwen is identifying the food..."):
-                        result = analyzer.analyze_food_image(
-                            st.session_state.qwen_image,
-                            "What food is this? Describe its main components, cooking style, and likely origin."
-                        )
-                        st.markdown("### 🔍 Food Identification")
-                        st.markdown(f'<div class="analysis-card">{result}</div>', unsafe_allow_html=True)
-                
-                elif action == "recipe":
-                    with st.spinner("🍳 Qwen is generating the recipe..."):
-                        result = analyzer.analyze_food_image(
-                            st.session_state.qwen_image,
-                            "Please provide a detailed recipe for this dish with ingredients and step-by-step instructions."
-                        )
-                        st.markdown("### 🍳 Recipe")
-                        st.markdown(f'<div class="analysis-card">{result}</div>', unsafe_allow_html=True)
-                
-                elif action == "nutrition":
-                    with st.spinner("🥗 Qwen is analyzing nutrition..."):
-                        result = analyzer.analyze_food_image(
-                            st.session_state.qwen_image,
-                            "Provide detailed nutritional information including calories, macros, vitamins, and health benefits."
-                        )
-                        st.markdown("### 🥗 Nutritional Analysis")
-                        st.markdown(f'<div class="analysis-card">{result}</div>', unsafe_allow_html=True)
-                
-                elif action == "comprehensive":
-                    with st.spinner("📊 Qwen is performing comprehensive analysis..."):
-                        result = analyzer.get_comprehensive_analysis(st.session_state.qwen_image)
-                        st.markdown("### 📊 Comprehensive Analysis")
-                        st.markdown(f'<div class="analysis-card">{result}</div>', unsafe_allow_html=True)
-                
-                # Clear the action after processing
-                del st.session_state.qwen_action
+            # Display results with enhanced styling
+            if 'calorie_result' in st.session_state:
+                st.markdown("### 🔥 Calorie Count Analysis")
+                st.markdown(f'<div class="result-container calories-result">{st.session_state.calorie_result}</div>', unsafe_allow_html=True)
+            
+            if 'ingredients_result' in st.session_state:
+                st.markdown("### 🥬 Ingredients List")
+                st.markdown(f'<div class="result-container ingredients-result">{st.session_state.ingredients_result}</div>', unsafe_allow_html=True)
+            
+            if 'recipe_result' in st.session_state:
+                st.markdown("### 👨‍🍳 Detailed Recipe")
+                st.markdown(f'<div class="result-container recipe-result">{st.session_state.recipe_result}</div>', unsafe_allow_html=True)
+            
+            if 'custom_result' in st.session_state:
+                st.markdown("### 💬 Custom Analysis")
+                st.markdown(f'<div class="result-container custom-result">{st.session_state.custom_result}</div>', unsafe_allow_html=True)
         
         else:
-            # Show example when no image is uploaded
-            st.markdown("### 🌟 Example Questions for Qwen")
+            # Enhanced welcome section
             st.markdown("""
-            <div class="analysis-card">
-            <h4>🍕 Food Identification</h4>
-            <ul>
-            <li>"What dish is this and where does it originate?"</li>
-            <li>"What ingredients can you identify in this image?"</li>
-            <li>"What cooking techniques were used here?"</li>
-            </ul>
-            </div>
-            
-            <div class="analysis-card">
-            <h4>🍳 Advanced Cooking Queries</h4>
-            <ul>
-            <li>"How do I achieve this texture and color?"</li>
-            <li>"What alternative ingredients could I use?"</li>
-            <li>"What's the difficulty level of this recipe?"</li>
-            </ul>
-            </div>
-            
-            <div class="analysis-card">
-            <h4>🥗 Detailed Nutrition</h4>
-            <ul>
-            <li>"Break down the macronutrients in this meal"</li>
-            <li>"What vitamins and minerals are present?"</li>
-            <li>"How does this fit into different dietary plans?"</li>
-            </ul>
+            <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; margin: 1rem 0;">
+                <h3>👆 Please upload a food image to get started!</h3>
+                <p>Upload any food image and get instant AI-powered analysis</p>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Example section with enhanced styling
+            st.markdown("### 🌟 What Qwen2.5-VL Can Do")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("""
+                <div class="feature-card">
+                    <h4>🔥 Advanced Calorie Analysis</h4>
+                    <ul>
+                        <li>📊 Precise calorie calculations</li>
+                        <li>📋 Professional nutritional breakdown</li>
+                        <li>🍽️ Detailed portion analysis</li>
+                        <li>📏 Scientific accuracy</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown("""
+                <div class="feature-card">
+                    <h4>🥬 Expert Ingredient Detection</h4>
+                    <ul>
+                        <li>📝 Comprehensive ingredients list</li>
+                        <li>⚖️ Precise quantities</li>
+                        <li>🗂️ Professional organization</li>
+                        <li>🛒 Recipe-ready format</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown("""
+                <div class="feature-card">
+                    <h4>👨‍🍳 Professional Recipes</h4>
+                    <ul>
+                        <li>📋 Master-level instructions</li>
+                        <li>🔥 Advanced cooking techniques</li>
+                        <li>⏰ Precise timing and temps</li>
+                        <li>👶 Beginner to expert guidance</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
     
-    # Footer
+    else:
+        # Authentication required section
+        if not HF_TOKEN:
+            st.warning("🔐 Please enter your HuggingFace access token to begin.")
+            st.markdown("""
+            ### How to get your token:
+            1. Go to [HuggingFace](https://huggingface.co)
+            2. Sign up/Login to your account
+            3. Go to Settings → Access Tokens
+            4. Create a new token with 'Read' permissions
+            5. Copy and paste it above
+            """)
+    
+    # Enhanced footer section
     st.markdown("---")
-    st.markdown(
-        "<p style='text-align: center; color: #888; font-size: 0.9rem;'>🤖 Powered by Qwen2.5-VL-7B-Instruct | Advanced AI Food Analysis</p>",
-        unsafe_allow_html=True
-    )
+    st.markdown("""
+    <div style="text-align: center; padding: 1.5rem; background: linear-gradient(45deg, #667eea, #764ba2); border-radius: 15px; color: white; margin: 1rem 0;">
+        <p style="font-size: 18px; margin: 0 0 0.5rem 0;"><strong>🤖 Qwen2.5-VL-7B-Instruct</strong> - Advanced Vision-Language AI</p>
+        <p style="margin: 0; opacity: 0.9;">🧠 Powerful Analysis • 🎯 High Accuracy • 📱 Professional Results • 🔬 Scientific Precision</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
