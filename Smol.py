@@ -1,477 +1,192 @@
 import streamlit as st
-from transformers import pipeline
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+from qwen_vl_utils import process_vision_info
 from PIL import Image
-import os
-from dotenv import load_dotenv
-import io
-import base64
-from prompt import SYSTEM_PROMPT
+import torch
+from prompts import (
+    FOOD_VALIDATION_PROMPT,
+    INGREDIENTS_SYSTEM_PROMPT,
+    RECIPE_SYSTEM_PROMPT,
+    NUTRITION_SYSTEM_PROMPT,
+    GENERAL_FOOD_PROMPT
+)
 
-# Load environment variables
-load_dotenv()
+st.title("🍽️ Advanced Culinary Food Analyzer")
+st.markdown("*Upload a food image and choose your analysis type*")
 
-class SmolFoodAnalyzer:
-    def __init__(self):
-        """Initialize the SmolVLM food analyzer"""
-        try:
-            # Initialize the pipeline with CPU device
-            self.pipe = pipeline(
-                "image-text-to-text", 
-                model="HuggingFaceTB/SmolVLM-Instruct",
-                device=-1  # Force CPU usage (-1 means CPU, 0+ means GPU)
-            )
-            self.model_loaded = True
-        except Exception as e:
-            self.model_loaded = False
-            self.error_message = f"Error loading model: {str(e)}"
-    
-    def get_calorie_count(self, image):
-        """Get calorie count of all food items in the image in tabular format"""
-        if not self.model_loaded:
-            return self.error_message
-        
-        try:
-            # Convert PIL image to base64 for the pipeline
-            buffered = io.BytesIO()
-            image.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            img_url = f"data:image/jpeg;base64,{img_str}"
-            
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "url": img_url},
-                        {"type": "text", "text": f"""{SYSTEM_PROMPT}
+# Sidebar for model selection
+st.sidebar.title("🤖 Model Configuration")
+model_options = {
+    "Qwen2-VL-7B-Instruct": "Qwen/Qwen2-VL-7B-Instruct",
+    "SmolVLM-256M-Instruct": "HuggingFaceTB/SmolVLM-256M-Instruct",
+    "SmolVLM2-2.2B-Instruct": "HuggingFaceTB/SmolVLM2-2.2B-Instruct"
+}
 
-IMPORTANT: Please provide ONLY the calorie information for the food in this image. Answer this specific question only:
+selected_model_name = st.sidebar.selectbox(
+    "Select Vision-Language Model:",
+    options=list(model_options.keys()),
+    index=0,  # Default to Qwen2-VL-7B-Instruct
+    help="Choose the AI model for food analysis"
+)
 
-"What is the calorie count of each food item visible in this image and what is the total calorie count?"
+selected_model_path = model_options[selected_model_name]
 
-Please format your response as a clear table with:
-- Food Item | Estimated Calories | Portion Size
-- Then provide the total calories at the end
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"**Selected Model:** {selected_model_name}")
+st.sidebar.markdown(f"**Model Path:** `{selected_model_path}`")
 
-Make it clear and organized in a tabular format. Do not provide any other information."""}
-                    ]
-                }
-            ]
-            
-            result = self.pipe(messages)
-            return result[0]['generated_text'] if result else "No response generated"
-            
-        except Exception as e:
-            return f"Error getting calorie count: {str(e)}"
-    
-    def get_ingredients(self, image):
-        """Get ingredients needed to make the food"""
-        if not self.model_loaded:
-            return self.error_message
-        
-        try:
-            # Convert PIL image to base64 for the pipeline
-            buffered = io.BytesIO()
-            image.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            img_url = f"data:image/jpeg;base64,{img_str}"
-            
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "url": img_url},
-                        {"type": "text", "text": f"""{SYSTEM_PROMPT}
-
-IMPORTANT: Please provide ONLY the ingredients information. Answer this specific question only:
-
-"What are all the ingredients needed to make this dish?"
-
-Please list only the ingredients with approximate quantities in a clear, organized format. Do not provide cooking instructions or other information."""}
-                    ]
-                }
-            ]
-            
-            result = self.pipe(messages)
-            return result[0]['generated_text'] if result else "No response generated"
-            
-        except Exception as e:
-            return f"Error getting ingredients: {str(e)}"
-    
-    def get_recipe(self, image):
-        """Get detailed recipe for the food"""
-        if not self.model_loaded:
-            return self.error_message
-        
-        try:
-            # Convert PIL image to base64 for the pipeline
-            buffered = io.BytesIO()
-            image.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            img_url = f"data:image/jpeg;base64,{img_str}"
-            
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "url": img_url},
-                        {"type": "text", "text": f"""{SYSTEM_PROMPT}
-
-IMPORTANT: Please provide ONLY a detailed, comprehensive recipe. Answer this specific question only:
-
-"What is the complete step-by-step recipe to make this dish from start to finish?"
-
-Please provide a CLEAR and DETAILED process with:
-
-**INGREDIENTS:**
-- Complete ingredients list with exact quantities
-
-**PREPARATION STEPS:**
-1. Detailed prep work (washing, chopping, measuring, etc.)
-2. Equipment setup and preparation
-
-**COOKING PROCESS:**
-1. Step 1: [Clear instruction with time and temperature]
-2. Step 2: [Clear instruction with time and temperature]
-3. Continue with each step clearly numbered
-4. Include cooking times, temperatures, and visual cues
-
-**FINISHING & SERVING:**
-- Final touches and presentation
-- Serving suggestions and portion size
-
-Make each step crystal clear so a complete beginner can follow successfully. Do not provide calorie information or other details."""}
-                    ]
-                }
-            ]
-            
-            result = self.pipe(messages)
-            return result[0]['generated_text'] if result else "No response generated"
-            
-        except Exception as e:
-            return f"Error getting recipe: {str(e)}"
-    
-    def analyze_food_image(self, image, user_question):
-        """Analyze food image and answer only the specific user question"""
-        if not self.model_loaded:
-            return self.error_message
-        
-        try:
-            # Convert PIL image to base64 for the pipeline
-            buffered = io.BytesIO()
-            image.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            img_url = f"data:image/jpeg;base64,{img_str}"
-            
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "url": img_url},
-                        {"type": "text", "text": f"""{SYSTEM_PROMPT}
-
-IMPORTANT: The user has asked a specific question. Please answer ONLY that question directly and concisely. Do not provide additional information unless specifically requested.
-
-User Question: {user_question}
-
-Please provide a focused answer to this question only."""}
-                    ]
-                }
-            ]
-            
-            result = self.pipe(messages)
-            return result[0]['generated_text'] if result else "No response generated"
-            
-        except Exception as e:
-            return f"Error analyzing image: {str(e)}"
-
-def main():
-    st.set_page_config(
-        page_title="🤖 SmolVLM Food Analyzer",
-        page_icon="🤖",
-        layout="centered"
+@st.cache_resource
+def load_model(model_path):
+    model = Qwen2VLForConditionalGeneration.from_pretrained(
+        model_path,
+        torch_dtype="auto",
+        device_map="auto"
     )
-    
-    # Add custom CSS for better styling
-    st.markdown("""
-    <style>
-    .main-header {
-        text-align: center;
-        padding: 1rem 0;
-        background: linear-gradient(90deg, #667eea, #764ba2);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.5rem;
-        font-weight: bold;
-        margin-bottom: 1rem;
-    }
-    .feature-card {
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        padding: 1.5rem;
-        border-radius: 15px;
-        border: 1px solid #dee2e6;
-        margin: 0.5rem 0;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        transition: transform 0.3s ease;
-        border-left: 5px solid #667eea;
-    }
-    .feature-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-    }
-    .result-container {
-        border-radius: 15px;
-        border: 2px solid;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    .calories-result {
-        background-color: #e3f2fd;
-        border-color: #2196f3;
-        color: #0d47a1;
-    }
-    .ingredients-result {
-        background-color: #e8f5e8;
-        border-color: #4caf50;
-        color: #1b5e20;
-    }
-    .recipe-result {
-        background-color: #fff3e0;
-        border-color: #ff9800;
-        color: #e65100;
-    }
-    .custom-result {
-        background-color: #f3e5f5;
-        border-color: #9c27b0;
-        color: #4a148c;
-    }
-    .stButton > button {
-        background: linear-gradient(45deg, #667eea, #764ba2);
-        color: white;
-        border: none;
-        border-radius: 10px;
-        padding: 0.5rem 1rem;
-        font-weight: bold;
-        transition: all 0.3s ease;
-    }
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Simple header with enhanced styling
-    st.markdown('<h1 class="main-header">🤖 SmolVLM Food Analyzer</h1>', unsafe_allow_html=True)
-    st.markdown("**Upload a food image and get detailed AI-powered analysis!**")
-    
-    # Info banner
-    st.info("💡 Using HuggingFace SmolVLM-Instruct model for advanced food analysis")
-    
-    # Image upload section
-    st.markdown("### 📷 Upload Food Image")
-    uploaded_file = st.file_uploader(
-        "Choose a food image...",
-        type=['jpg', 'jpeg', 'png', 'webp'],
-        help="Upload clear, well-lit images for best results"
+    processor = AutoProcessor.from_pretrained(
+        model_path
     )
+    return model, processor
+
+def validate_food_image(image, model, processor):
+    """Check if image contains food items"""
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": FOOD_VALIDATION_PROMPT}]},
+        {"role": "user", "content": [
+            {"type": "image", "image": image},
+            {"type": "text", "text": "Is this image a food item?"},
+        ]}
+    ]
     
-    # Display uploaded image
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Food Image", use_column_width=True)
-        st.session_state.uploaded_image = image
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, video_inputs = process_vision_info(messages)
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt"
+    ).to("cuda" if torch.cuda.is_available() else "cpu")
+    
+    generated_ids = model.generate(**inputs, max_new_tokens=10)
+    generated_ids_trimmed = [
+        out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
+    output_text = processor.batch_decode(
+        generated_ids_trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False
+    )[0].strip()
+    
+    return "VALID_FOOD" in output_text
+
+def analyze_food(image, system_prompt, analysis_type, model, processor, user_question=""):
+    """Analyze food image with specific system prompt"""
+    
+    user_text = f"Please provide a detailed {analysis_type} analysis of this food image."
+    if user_question.strip():
+        user_text = f"{user_question.strip()}"
+    
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+        {"role": "user", "content": [
+            {"type": "image", "image": image},
+            {"type": "text", "text": user_text},
+        ]}
+    ]
+    
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, video_inputs = process_vision_info(messages)
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt"
+    ).to("cuda" if torch.cuda.is_available() else "cpu")
+    
+    generated_ids = model.generate(**inputs, max_new_tokens=1024)
+    generated_ids_trimmed = [
+        out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
+    output_text = processor.batch_decode(
+        generated_ids_trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False
+    )[0]
+    
+    return output_text
+
+# Load model with selected model path
+model, processor = load_model(selected_model_path)
+
+# File uploader
+uploaded_file = st.file_uploader("📸 Upload a Food Image", type=["jpg", "png", "jpeg"])
+
+if uploaded_file:
+    image = Image.open(uploaded_file)
+    st.image(image, caption='Uploaded Food Image', use_column_width=True)
+    
+    # Validate if image contains food
+    if not validate_food_image(image, model, processor):
+        st.error("🚫 **Not Recognized as Food Item**")
+        st.warning("The uploaded image is not recognized as a food item. Please upload an image containing food, beverages, or edible items.")
+    else:
+        st.success("✅ Food item detected! Choose your analysis:")
         
-        # Initialize analyzer
-        if 'smol_analyzer' not in st.session_state:
-            with st.spinner("Loading SmolVLM model..."):
-                st.session_state.smol_analyzer = SmolFoodAnalyzer()
-        
-        analyzer = st.session_state.smol_analyzer
-        
-        # Check if model loaded successfully
-        if not analyzer.model_loaded:
-            st.error(f"❌ Model loading failed: {analyzer.error_message}")
-            st.stop()
-        
-        # Three main sections with enhanced styling
-        st.markdown("### 🎯 Analysis Options")
-        st.markdown("Click any button below to get specific analysis:")
-        
+        # Create columns for buttons
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🔥 Get Calories", use_container_width=True, help="Get detailed calorie breakdown in tabular format"):
-                with st.spinner("🔍 Calculating calories..."):
-                    result = analyzer.get_calorie_count(st.session_state.uploaded_image)
-                    st.session_state.calorie_result = result
-                    st.success("Calorie analysis completed!")
+            ingredients_btn = st.button("🥕 **Ingredients Analysis**", use_container_width=True)
         
         with col2:
-            if st.button("🥬 Get Ingredients", use_container_width=True, help="Get complete ingredients list with quantities"):
-                with st.spinner("🔍 Identifying ingredients..."):
-                    result = analyzer.get_ingredients(st.session_state.uploaded_image)
-                    st.session_state.ingredients_result = result
-                    st.success("Ingredients identified!")
-        
+            recipe_btn = st.button("👨‍🍳 **Recipe & Instructions**", use_container_width=True)
+            
         with col3:
-            if st.button("👨‍🍳 Get Recipe", use_container_width=True, help="Get detailed step-by-step cooking instructions"):
-                with st.spinner("🔍 Generating detailed recipe..."):
-                    result = analyzer.get_recipe(st.session_state.uploaded_image)
-                    st.session_state.recipe_result = result
-                    st.success("Recipe generated!")
+            calories_btn = st.button("🔢 **Calories & Nutrition**", use_container_width=True)
         
-        # Display results
-        if 'calorie_result' in st.session_state:
-            st.markdown("### 🔥 Calorie Count Analysis")
-            
-            # Create a nice container for the calorie results
-            with st.container():
-                st.markdown("""
-                <div style="background-color: #f0f8ff; padding: 20px; border-radius: 10px; border-left: 5px solid #ff6b6b;">
-                """, unsafe_allow_html=True)
-                
-                # Parse and format the calorie result
-                calorie_text = st.session_state.calorie_result
-                st.markdown(f"**📊 Nutritional Breakdown:**")
-                st.markdown(calorie_text)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("---")
-        
-        if 'ingredients_result' in st.session_state:
-            st.markdown("### 🥬 Required Ingredients")
-            
-            # Create a nice container for ingredients
-            with st.container():
-                st.markdown("""
-                <div style="background-color: #f0fff0; padding: 20px; border-radius: 10px; border-left: 5px solid #4caf50;">
-                """, unsafe_allow_html=True)
-                
-                st.markdown(f"**🛒 Shopping List:**")
-                ingredients_text = st.session_state.ingredients_result
-                st.markdown(ingredients_text)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("---")
-        
-        if 'recipe_result' in st.session_state:
-            st.markdown("### 👨‍🍳 Step-by-Step Recipe")
-            
-            # Create a nice container for recipe
-            with st.container():
-                st.markdown("""
-                <div style="background-color: #fff8f0; padding: 20px; border-radius: 10px; border-left: 5px solid #ff9800;">
-                """, unsafe_allow_html=True)
-                
-                st.markdown(f"**📋 Cooking Instructions:**")
-                recipe_text = st.session_state.recipe_result
-                
-                # Split recipe into sections if possible
-                if "INGREDIENTS:" in recipe_text and "PREPARATION" in recipe_text:
-                    # Try to format the recipe nicely
-                    sections = recipe_text.split("**")
-                    formatted_recipe = ""
-                    for section in sections:
-                        if section.strip():
-                            formatted_recipe += f"**{section}**" if not section.startswith("**") else section
-                    st.markdown(formatted_recipe)
-                else:
-                    st.markdown(recipe_text)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("---")
-        
-        # Custom question section
-        st.subheader("💬 Ask Your Own Question")
+        # Additional questions section
+        st.markdown("---")
+        st.subheader("❓ Ask Additional Questions")
         user_question = st.text_area(
-            "What else would you like to know about this food?",
-            placeholder="e.g., Is this healthy? What cuisine is this? Can I make this vegan?",
+            "Have a specific question about this food?",
+            placeholder="e.g., What cuisine is this? How spicy is it? Can I make it vegan?",
             height=100
         )
         
-        # Custom question analyze button
-        if st.button("🤖 Ask Custom Question", type="primary", use_container_width=True):
-            if user_question:
-                with st.spinner("Analyzing your question..."):
-                    result = analyzer.analyze_food_image(st.session_state.uploaded_image, user_question)
-                    
-                    # Display custom analysis with nice formatting
-                    st.markdown("### 🤖 AI Analysis Response")
-                    with st.container():
-                        st.markdown("""
-                        <div style="background-color: #f5f5ff; padding: 20px; border-radius: 10px; border-left: 5px solid #6c5ce7;">
-                        """, unsafe_allow_html=True)
-                        
-                        st.markdown(f"**❓ Your Question:** {user_question}")
-                        st.markdown(f"**🤖 AI Response:**")
-                        st.markdown(result)
-                        
-                        st.markdown("</div>", unsafe_allow_html=True)
+        ask_question_btn = st.button("💬 **Ask Question**", use_container_width=True)
+        
+        # Handle button clicks
+        if ingredients_btn:
+            with st.spinner("🔍 Analyzing ingredients..."):
+                result = analyze_food(image, INGREDIENTS_SYSTEM_PROMPT, "ingredients", model, processor)
+                st.markdown("## 🥕 Ingredients Analysis")
+                st.markdown(result)
+        
+        elif recipe_btn:
+            with st.spinner("👨‍🍳 Creating recipe..."):
+                result = analyze_food(image, RECIPE_SYSTEM_PROMPT, "recipe", model, processor)
+                st.markdown("## 👨‍🍳 Complete Recipe & Cooking Instructions")
+                st.markdown(result)
+        
+        elif calories_btn:
+            with st.spinner("🔢 Calculating nutrition..."):
+                result = analyze_food(image, NUTRITION_SYSTEM_PROMPT, "nutrition", model, processor)
+                st.markdown("## 🔢 Calorie Count & Nutritional Analysis")
+                st.markdown(result)
+        
+        elif ask_question_btn:
+            if user_question.strip():
+                with st.spinner("💭 Processing your question..."):
+                    result = analyze_food(image, GENERAL_FOOD_PROMPT, "general", model, processor, user_question)
+                    st.markdown("## 💬 Answer to Your Question")
+                    st.markdown(result)
             else:
-                st.error("Please enter a question.")
-    
-    else:
-        # Enhanced welcome section
-        st.markdown("""
-        <div style="text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; color: white; margin: 1rem 0;">
-            <h3>👆 Please upload a food image to get started!</h3>
-            <p>Upload any food image and get instant AI-powered analysis</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Example section with enhanced styling
-        st.markdown("### 🌟 What SmolVLM Can Do")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("""
-            <div class="feature-card">
-                <h4>🔥 Calorie Analysis</h4>
-                <ul>
-                    <li>📊 Detailed calorie breakdown</li>
-                    <li>📋 Tabular format for clarity</li>
-                    <li>🍽️ Per-item and total calories</li>
-                    <li>📏 Portion size estimates</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("""
-            <div class="feature-card">
-                <h4>🥬 Ingredient Detection</h4>
-                <ul>
-                    <li>📝 Complete ingredients list</li>
-                    <li>⚖️ Approximate quantities</li>
-                    <li>🗂️ Clear organization</li>
-                    <li>🛒 Recipe-ready format</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown("""
-            <div class="feature-card">
-                <h4>👨‍🍳 Detailed Recipes</h4>
-                <ul>
-                    <li>📋 Step-by-step instructions</li>
-                    <li>🔥 Clear cooking process</li>
-                    <li>⏰ Times and temperatures</li>
-                    <li>👶 Beginner-friendly format</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Enhanced footer section
-    st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; padding: 1.5rem; background: linear-gradient(45deg, #667eea, #764ba2); border-radius: 15px; color: white; margin: 1rem 0;">
-        <p style="font-size: 18px; margin: 0 0 0.5rem 0;"><strong>🤖 SmolVLM-Instruct</strong> - Lightweight Vision-Language AI</p>
-        <p style="margin: 0; opacity: 0.9;">📱 CPU Optimized • 🚀 Fast Analysis • 🎯 Accurate Results • 💡 Easy to Use</p>
-    </div>
-    """, unsafe_allow_html=True)
+                st.warning("Please enter a question first.")
 
-if __name__ == "__main__":
-    main()
+else:
+    st.info("👆 Please upload a food image to begin analysis")
+
+# Add footer
+st.markdown("---")
+st.markdown(f"*🤖 Powered by {selected_model_name} | Advanced Food AI Assistant*")
