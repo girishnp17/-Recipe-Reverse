@@ -3,3 +3,9 @@ google-generativeai>=0.3.0
 Pillow>=10.0.0
 python-dotenv>=1.0.0
 requests>=2.31.0
+transformers>=4.42.0
+qwen_vl_utils
+torch
+accelerate
+flash-attn 
+huggingface_hub
